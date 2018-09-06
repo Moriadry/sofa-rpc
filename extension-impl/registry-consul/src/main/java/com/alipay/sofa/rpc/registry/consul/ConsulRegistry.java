@@ -34,8 +34,6 @@ import com.alipay.sofa.rpc.registry.Registry;
 import com.alipay.sofa.rpc.registry.consul.common.*;
 import com.alipay.sofa.rpc.registry.consul.internal.ConsulManager;
 import com.alipay.sofa.rpc.registry.consul.model.*;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -82,7 +80,7 @@ public class ConsulRegistry extends Registry {
      */
     private ConcurrentMap<ConsumerConfig, String>                             consumerUrls           = new ConcurrentHashMap<ConsumerConfig, String>();
 
-    private Cache<String, Map<String, List<ConsulURL>>>                       serviceCache;
+    private ConcurrentMap<String, Map<String, List<ConsulURL>>>               serviceCache;
 
     private final ConcurrentMap<String, Long>                                 lookupGroupServices    = Maps
                                                                                                          .newConcurrentMap();
@@ -138,7 +136,7 @@ public class ConsulRegistry extends Registry {
             .withPort(Integer.valueOf(url.getPort()).toString())//
             .withName(ConsulURLUtils.toServiceName(url.getGroup()))//
             .withTag(ConsulURLUtils.healthServicePath(url, ThrallRoleType.PROVIDER))//
-            .withId(url.getHost() + ":" + url.getPort() + "-" + url.getPath() + "-" + url.getVersion())//
+            .withId(url.getHost() + ":" + url.getPort() + "-" + url.getGroup() + "-" + url.getVersion())//
             .withCheckInterval(Integer.valueOf(ConsulConstants.TTL).toString()).build();
     }
 
@@ -158,7 +156,8 @@ public class ConsulRegistry extends Registry {
 
         String[] address = validateIp(registryConfig);
         consulManager = new ConsulManager(address[0], Integer.parseInt(address[1]));
-        serviceCache = CacheBuilder.newBuilder().maximumSize(1000).build();
+        //        serviceCache = CacheBuilder.newBuilder().maximumSize(1000).build();
+        serviceCache = new ConcurrentHashMap<String, Map<String, List<ConsulURL>>>();
         notifyExecutor = Executors.newCachedThreadPool(
             new NamedThreadFactory("NotifyConsumerListener", true));
     }
@@ -293,26 +292,9 @@ public class ConsulRegistry extends Registry {
                 String url = ConsulRegistryHelper.convertConsumerToUrl(config);
                 ConsulURL consulURL = ConsulURL.valueOf(url);
 
-                Iterator<Map.Entry<String, Map<String, List<ConsulURL>>>> it = serviceCache.asMap().entrySet()
+                Iterator<Map.Entry<String, Map<String, List<ConsulURL>>>> it = serviceCache.entrySet()
                     .iterator();
-
-                Set<ProviderInfo> result = new HashSet<ProviderInfo>();
-
                 List<ConsulURL> matchConsulUrls = new ArrayList<ConsulURL>();
-                // find all providerInfos
-                while (it.hasNext()) {
-                    Map.Entry<String, Map<String, List<ConsulURL>>> entry = it.next();
-                    Collection<List<ConsulURL>> consulURLList = entry.getValue().values();
-
-                    List<ProviderInfo> matchProviders = new ArrayList<ProviderInfo>();
-                    Iterator<List<ConsulURL>> consulListIt = consulURLList.iterator();
-                    while (consulListIt.hasNext()) {
-                        List<ConsulURL> next = consulListIt.next();
-                        matchConsulUrls.addAll(next);
-                        matchProviders.addAll(ConsulRegistryHelper.convertUrl2ProviderInfos(next));
-                    }
-                    result.addAll(ConsulRegistryHelper.matchProviderInfos(config, matchProviders));
-                }
 
                 NotifyConsumerListner listener = new NotifyConsumerListner(consulURL, matchConsulUrls);
 
@@ -342,6 +324,23 @@ public class ConsulRegistry extends Registry {
                     consulManager.registerEphemralNode(ephemralNode);
                 } else {
                     notifyListener(consulURL, listener);
+                }
+
+                Set<ProviderInfo> result = new HashSet<ProviderInfo>();
+
+                // find all providerInfos
+                while (it.hasNext()) {
+
+                    Map.Entry<String, Map<String, List<ConsulURL>>> entry = it.next();
+                    Collection<List<ConsulURL>> consulURLList = entry.getValue().values();
+                    List<ProviderInfo> matchProviders = new ArrayList<ProviderInfo>();
+                    Iterator<List<ConsulURL>> consulListIt = consulURLList.iterator();
+                    while (consulListIt.hasNext()) {
+                        List<ConsulURL> next = consulListIt.next();
+                        matchConsulUrls.addAll(next);
+                        matchProviders.addAll(ConsulRegistryHelper.convertUrl2ProviderInfos(next));
+                    }
+                    result.addAll(ConsulRegistryHelper.matchProviderInfos(config, matchProviders));
                 }
 
                 return Collections.singletonList(new ProviderGroup().addAll(result));
@@ -384,7 +383,7 @@ public class ConsulRegistry extends Registry {
     }
 
     private void notifyListener(ConsulURL url, NotifyListener listener) {
-        Map<String, List<ConsulURL>> groupCacheUrls = serviceCache.getIfPresent(url.getGroup());
+        Map<String, List<ConsulURL>> groupCacheUrls = serviceCache.get(url.getGroup());
         if (groupCacheUrls != null) {
             for (Map.Entry<String, List<ConsulURL>> entry : groupCacheUrls.entrySet()) {
                 String cacheServiceKey = entry.getKey();
@@ -442,6 +441,7 @@ public class ConsulRegistry extends Registry {
                     }
                     urlList.add(providerUrl);
                 }
+                serviceCache.put(group, groupProviderUrls);
                 lookupGroupServices.put(group, consulResp.getConsulIndex());
                 return groupProviderUrls;
             }
@@ -481,7 +481,7 @@ public class ConsulRegistry extends Registry {
                     Map<String, List<ConsulURL>> groupNewUrls = lookupServiceUpdate(group);
                     if (groupNewUrls != null && !groupNewUrls.isEmpty()) {
                         // 缓存中的值
-                        Map<String, List<ConsulURL>> groupCacheUrls = serviceCache.getIfPresent(group);
+                        Map<String, List<ConsulURL>> groupCacheUrls = serviceCache.get(group);
                         if (groupCacheUrls == null) {
                             groupCacheUrls = Maps.newConcurrentMap();
                             serviceCache.put(group, groupCacheUrls);

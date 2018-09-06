@@ -766,19 +766,31 @@ public class ConsulURL implements Serializable {
     }
 
     public String getServiceKey() {
-        String inf = getServiceInterface();
-        if (inf == null)
+        /* String inf = getServiceInterface();
+         if (inf == null)
+             return null;
+         StringBuilder buf = new StringBuilder();
+         String group = getGroup();
+         if (group != null && group.length() > 0) {
+             buf.append(group).append("/");
+         }
+         buf.append(inf);
+         String version = getVersion();
+         if (version != null && version.length() > 0) {
+             buf.append(":").append(version);
+         }
+         return buf.toString();*/
+
+        String inf = getGroup();
+        if (inf == null) {
             return null;
+        }
         StringBuilder buf = new StringBuilder();
-        String group = getGroup();
-        if (group != null && group.length() > 0) {
-            buf.append(group).append("/");
-        }
-        buf.append(inf);
-        String version = getVersion();
-        if (version != null && version.length() > 0) {
-            buf.append(":").append(version);
-        }
+        String interfaceName = getServiceInterface();
+        String version = getNotRpcVersion();
+
+        buf.append(interfaceName).append(":").append(version).append(":").append(inf);
+
         return buf.toString();
     }
 
@@ -790,6 +802,11 @@ public class ConsulURL implements Serializable {
     public String getVersion() {
         String group = getParameter(RpcConstants.CONFIG_KEY_RPC_VERSION, ConsulConstants.DEFAULT_VERSION);
         return group;
+    }
+
+    public String getNotRpcVersion() {
+        String version = getParameter("version");
+        return version;
     }
 
     public String getServiceInterface() {

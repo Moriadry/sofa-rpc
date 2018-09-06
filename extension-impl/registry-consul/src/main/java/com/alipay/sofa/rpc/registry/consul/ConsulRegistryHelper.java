@@ -51,9 +51,11 @@ public class ConsulRegistryHelper extends RegistryUtils {
         List<ProviderInfo> result = new ArrayList<ProviderInfo>();
 
         for (ConsulURL consulUrl : consulUrls) {
-            ProviderInfo providerInfo = new ProviderInfo();
-
-            ProviderHelper.toProviderInfo(consulUrl.toString());
+            String urlString = consulUrl.toString();
+            if (urlString.startsWith("/")) {
+                urlString = urlString.substring(1);
+            }
+            ProviderInfo providerInfo = ProviderHelper.toProviderInfo(urlString);
             providerInfo.setPath(consulUrl.getPath());
             providerInfo.setPort(consulUrl.getPort());
 
